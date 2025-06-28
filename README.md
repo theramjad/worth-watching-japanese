@@ -1,0 +1,248 @@
+# Worth Watching - YouTube Japanese Comprehension Analyzer
+
+A Chrome extension that analyzes Japanese YouTube videos based on your AnkiMorphs known words data to show comprehension scores. Includes a high-accuracy MeCab API server that provides identical results to AnkiMorphs.
+
+## Project Structure
+
+```
+worth-watching/
+├── chrome-extension/          # Chrome extension files
+│   ├── manifest.json
+│   ├── content/              # Content scripts for YouTube
+│   ├── lib/                  # API handlers and utilities
+│   ├── popup/                # Extension popup
+│   ├── settings/             # Settings page
+│   ├── background/           # Service worker
+│   ├── icons/                # Extension icons
+│   └── styles/               # CSS files
+├── mecab-api-server/         # MeCab API server for accurate analysis
+│   ├── app.py               # Flask application with Japanese morphological analysis
+│   ├── install.py           # Auto-installer for MeCab dependencies
+│   ├── run.py               # Server launcher
+│   ├── requirements.txt     # Python dependencies
+│   └── README.md            # API server documentation
+└── ankimorph/                # AnkiMorphs source code (reference only)
+```
+
+## Features
+
+- **High Accuracy Analysis**: Uses MeCab morphological analyzer for precise results matching AnkiMorphs
+- **Real-time Comprehension Scoring**: Shows percentage of known words next to YouTube video titles
+- **AnkiMorphs Integration**: Directly imports your AnkiMorphs CSV export data with interval-based categorization
+- **Smart Content Detection**: Only analyzes Japanese videos and subtitles
+- **Color-coded Results**: 
+  - 🟢 Green (90%+): High comprehension
+  - 🟡 Orange (70-89%): Medium comprehension
+  - 🔴 Red (<70%): Low comprehension
+- **Multi-page Support**: Works on YouTube homepage, search results, playlists, and watch pages
+- **Intelligent Caching**: Avoids re-analyzing the same videos
+
+## Quick Start
+
+### 1. Set Up MeCab API Server
+
+The MeCab API server provides morphological analysis identical to AnkiMorphs:
+
+```bash
+cd mecab-api-server
+python install.py    # Auto-installs MeCab for your OS
+python run.py        # Starts server on localhost:9002
+```
+
+**Server Endpoints:**
+- `POST /analyze/{video_id}` - Analyze video with CSV data
+- `GET /test/{video_id}` - Test with local CSV file  
+- `GET /health` - Health check
+
+### 2. Install Chrome Extension
+
+1. Open Chrome and go to `chrome://extensions/`
+2. Enable "Developer mode" (top right toggle)
+3. Click "Load unpacked" and select the `chrome-extension` folder
+4. The extension icon should appear in your toolbar
+
+### 3. Configure Extension
+
+1. Click the extension icon and go to "Settings"
+2. Upload your AnkiMorphs CSV file:
+   - Must include `Morph-Lemma` and `Morph-Inflection` columns
+   - Optional: `Highest-Learning-Interval` for accurate known/learning/unknown categorization
+3. Select "MeCab API" as your morphemizer (if server is running)
+4. Save configuration
+
+### 4. Use on YouTube
+
+Navigate to YouTube and you'll see comprehension scores next to video titles!
+
+## How It Works
+
+### Analysis Pipeline
+1. **Content Detection**: Identifies Japanese videos on YouTube pages
+2. **Subtitle Extraction**: Fetches Japanese subtitles when available using YouTube Transcript API
+3. **Morphological Analysis**: Uses MeCab to extract morphemes (lemma + inflection pairs)
+4. **Comprehension Calculation**: Compares against your AnkiMorphs data using interval-based categorization:
+   - **Known**: Interval ≥ 21 (contributes to comprehension score)
+   - **Learning**: 1 ≤ Interval < 21 (counted but not as "known")
+   - **Unknown**: Interval = 0 or not in data
+5. **Score Display**: Shows colored percentage badges on video titles
+
+### Key Technical Features
+- **Exact AnkiMorphs Compatibility**: Uses identical morpheme key format (lemma+inflection)
+- **Interval-based Categorization**: Respects AnkiMorphs learning intervals (default: 21+ = known)
+- **Rate Limiting**: Prevents API overload with intelligent request timing
+- **Error Handling**: Graceful fallback when subtitles or analysis fail
+
+## File Structure
+
+### Chrome Extension
+```
+chrome-extension/
+├── manifest.json                 # Extension configuration
+├── popup/
+│   ├── popup.html               # Extension popup interface
+│   └── popup.js                 # Popup functionality and stats
+├── settings/
+│   ├── settings.html            # Settings configuration page
+│   └── settings.js              # CSV parsing and storage management
+├── content/
+│   └── youtube-content.js       # YouTube page integration and UI updates
+├── background/
+│   └── service-worker.js        # Background service worker
+├── lib/
+│   ├── csv-parser.js            # AnkiMorphs CSV parsing with interval support
+│   ├── mecab-api-morphemizer.js # MeCab API client (unused - legacy)
+│   └── youtube-api.js           # Video analysis and subtitle fetching
+├── styles/
+│   └── extension.css            # Extension styling
+└── icons/                       # Extension icons
+```
+
+### MeCab API Server
+```
+mecab-api-server/
+├── app.py                       # Main Flask application
+│   ├── MeCabAnalyzer           # Japanese morpheme extraction
+│   ├── YouTubeSubtitleFetcher  # Subtitle fetching with youtube-transcript-api
+│   ├── ComprehensionCalculator # AnkiMorphs-compatible scoring
+│   └── API endpoints           # /analyze, /test, /health
+├── install.py                   # MeCab dependency installer
+├── run.py                      # Server launcher
+└── requirements.txt            # Python dependencies
+```
+
+## AnkiMorphs CSV Format
+
+**Required Columns:**
+- `Morph-Lemma`: Base form of words (e.g., "食べる")
+- `Morph-Inflection`: Inflected forms (e.g., "食べた")
+
+**Optional Columns (for accurate categorization):**
+- `Highest-Learning-Interval`: Used to determine known (≥21) vs learning (1-20) vs unknown (0)
+- `Occurrence`: Frequency data
+- `Lemma-Priority`: Priority values
+- `Inflection-Priority`: Priority values
+
+**Export from AnkiMorphs:**
+1. Open AnkiMorphs → Generators → Known Morphs Exporter
+2. Select "Inflections" (not just "Lemmas")
+3. Ensure interval data is included
+4. Export and upload to extension
+
+## Technical Implementation
+
+### Morphological Analysis
+- **MeCab Integration**: Uses MeCab with default configuration for detailed morphological analysis
+- **AnkiMorphs Key Format**: Creates morpheme keys as `lemma + inflection` to match AnkiMorphs exactly
+- **Text Preprocessing**: Adds whitespace and punctuation for proper MeCab parsing
+- **POS Filtering**: Excludes symbols, punctuation, and numbers like AnkiMorphs
+
+### Performance Optimizations
+- **Intelligent Caching**: Stores analysis results to avoid repeated processing
+- **Rate Limiting**: Controls API request frequency to prevent overload
+- **Background Processing**: Non-blocking UI updates
+- **Efficient DOM Manipulation**: Minimal page impact
+
+### Privacy & Security
+- **Local Processing**: All analysis happens on your machine
+- **No External Data**: Your AnkiMorphs data never leaves your device
+- **CORS Enabled**: Secure API communication between extension and server
+
+## Troubleshooting
+
+### Extension Issues
+
+**No comprehension scores showing?**
+- Check that the MeCab server is running (`python run.py`)
+- Verify you've uploaded a valid AnkiMorphs CSV file
+- Ensure you're on Japanese content (extension only analyzes Japanese videos)
+- Check browser console for error messages (F12 → Console)
+
+**Scores seem too low compared to AnkiMorphs?**
+- Make sure your CSV includes interval data (`Highest-Learning-Interval`)
+- Verify you exported "Inflections" (not just "Lemmas") from AnkiMorphs
+- Check that the MeCab server is being used (not fallback tokenizer)
+
+**Extension not loading?**
+- Ensure Developer Mode is enabled in `chrome://extensions/`
+- Check for permission errors in the extension console
+- Try reloading the extension after code changes
+
+### Server Issues
+
+**MeCab server won't start?**
+- Run `python install.py` to install MeCab dependencies
+- Check that port 9002 is available
+- Try running with `python app.py` directly for debug output
+
+**Analysis failing?**
+- Check server logs for Japanese subtitle fetching errors
+- Verify video has Japanese subtitles available
+- Test with `/test/{video_id}` endpoint using local CSV
+
+### Common Fixes
+
+**Accuracy Issues:**
+1. Re-export CSV from AnkiMorphs with interval data
+2. Reload Chrome extension after re-uploading CSV
+3. Clear extension cache in settings
+4. Restart MeCab server
+
+**Performance Issues:**
+1. Check rate limiting settings in youtube-api.js
+2. Clear browser cache and extension storage
+3. Restart browser if extension becomes unresponsive
+
+## Development
+
+### Making Changes
+1. Edit source files in `chrome-extension/` or `mecab-api-server/`
+2. Reload extension in `chrome://extensions/` (click reload button)
+3. Restart MeCab server if you modified server code
+4. Test on YouTube pages
+
+### Key Components
+- **YouTubeComprehensionAnalyzer**: Main content script coordinator
+- **ComprehensionCalculator**: Server-side scoring with AnkiMorphs compatibility
+- **AnkiMorphsCSVParser**: Extension CSV parsing with interval support
+- **MeCabAnalyzer**: Server morphological analysis engine
+
+### Adding Features
+- Modify `youtube-content.js` for UI changes
+- Update `app.py` for server-side analysis improvements
+- Edit `settings.js` for configuration options
+
+## Contributing
+
+Issues and pull requests welcome! When contributing:
+- Test with real AnkiMorphs data
+- Verify accuracy against AnkiMorphs readability reports
+- Include documentation updates
+- Follow existing code style and commenting
+
+## License
+
+This project is open source. Feel free to use and modify as needed.
+
+---
+
+**Note**: This extension is designed to complement AnkiMorphs for Japanese language learning. For best results, use with a well-maintained AnkiMorphs database with interval data.

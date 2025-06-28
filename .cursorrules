@@ -1,0 +1,32 @@
+# Worth Watching - YouTube Japanese Comprehension Analyzer
+# Cursor IDE Rules and Coding Standards
+
+## Console Logging Standards
+- **ALWAYS** prefix console.log statements with `[JCA]` for this project
+- Example: `console.log('[JCA] Message here');`
+- This helps filter extension logs in browser console
+- Apply to ALL JavaScript files in chrome-extension/ directory
+
+## Code Organization
+- Keep MeCab API server in `/mecab-api-server/` 
+- Keep Chrome extension code in `/chrome-extension/`
+- Use clear, descriptive function and variable names
+
+## Chrome Extension Structure
+- `content/` - Content scripts that run on YouTube pages
+- `lib/` - Utility libraries and API handlers  
+- `popup/` - Extension popup interface
+- `background/` - Service worker scripts
+- `manifest.json` - Extension configuration
+
+## API Standards
+- MeCab server runs on localhost:9002
+- All video analysis uses POST requests with CSV data
+- Health check endpoint returns `mecab_working` field
+- Always handle API errors gracefully
+
+## Video Analysis Rules
+- Extension works on: home, search, playlist, watch later pages  
+- Skip analysis on: watch pages, playlist directories, feed pages (except watch later)
+- Use rate limiting for API requests
+- Cache comprehension scores to avoid duplicate analysis 
