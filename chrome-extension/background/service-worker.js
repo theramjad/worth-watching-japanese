@@ -232,8 +232,7 @@ class BackgroundService {
             const allData = await chrome.storage.local.get();
             const analysisCacheKeys = Object.keys(allData).filter(key =>
                 key.startsWith('analysis_') ||
-                key.startsWith('comprehension_') ||
-                key.startsWith('metadata_')
+                key.startsWith('comprehension_')
             );
 
             if (analysisCacheKeys.length > 0) {

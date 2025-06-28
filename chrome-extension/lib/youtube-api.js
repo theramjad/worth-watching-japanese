@@ -49,144 +49,15 @@ class YouTubeAnalyzer {
         return null;
     }
 
-    /**
-     * Get comprehensive video metadata including title, description, and subtitles
-     * Tries multiple methods to extract data from YouTube's page structure
-     */
-    async getVideoMetadata(videoId) {
-        if (!videoId) return null;
 
-        // Check memory cache first
-        const cacheKey = `metadata_${videoId}`;
-        if (this.cache.has(cacheKey)) {
-            return this.cache.get(cacheKey);
-        }
 
-        // Check persistent cache
-        try {
-            const persistentCache = await chrome.storage.local.get(cacheKey);
-            if (persistentCache[cacheKey]) {
-                const metadata = persistentCache[cacheKey];
-                this.cache.set(cacheKey, metadata);
-                return metadata;
-            }
-        } catch (error) {
-            console.warn(`[JCA] Error checking persistent metadata cache: ${error}`);
-        }
 
-        try {
-            // Try to extract metadata from page's JSON data
-            const metadata = this.extractMetadataFromPage(videoId);
 
-            if (metadata) {
-                // Cache in memory
-                this.cache.set(cacheKey, metadata);
 
-                // Cache persistently
-                try {
-                    await chrome.storage.local.set({ [cacheKey]: metadata });
-                } catch (error) {
-                    console.warn(`[JCA] Error saving metadata to persistent cache: ${error}`);
-                }
 
-                return metadata;
-            }
 
-        } catch (error) {
-            console.warn(`Error getting metadata for video ${videoId}:`, error);
-        }
 
-        return null;
-    }
 
-    /**
-     * Extract metadata directly from the current page DOM
-     * Used when we're already on the video page
-     */
-    extractMetadataFromPage(videoId) {
-        // Look for JSON data in script tags
-        const scripts = document.querySelectorAll('script');
-
-        for (const script of scripts) {
-            if (script.textContent && script.textContent.includes('ytInitialData')) {
-                try {
-                    const jsonMatch = script.textContent.match(/var ytInitialData = ({.*?});/);
-                    if (jsonMatch) {
-                        const data = JSON.parse(jsonMatch[1]);
-                        return this.parseYouTubeInitialData(data, videoId);
-                    }
-                } catch (error) {
-                    // Continue searching
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Parse YouTube's complex initialData structure to extract video information
-     * YouTube stores video data in various nested objects
-     */
-    parseYouTubeInitialData(data, videoId) {
-        try {
-            // This is a simplified parser - YouTube's data structure is complex
-            // In a real implementation, you'd need more robust parsing
-
-            const videoDetails = data?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.[0]?.videoPrimaryInfoRenderer;
-
-            if (videoDetails) {
-                return {
-                    videoId: videoId,
-                    title: this.extractTextFromRuns(videoDetails.title),
-                    description: this.extractTextFromRuns(videoDetails.description),
-                    hasSubtitles: this.checkForSubtitles(data)
-                };
-            }
-
-        } catch (error) {
-            console.warn('Error parsing YouTube initial data:', error);
-        }
-
-        return null;
-    }
-
-    /**
-     * Extract text from YouTube's text run objects
-     * YouTube often stores text as arrays of objects with different formatting
-     */
-    extractTextFromRuns(textObject) {
-        if (!textObject) return '';
-
-        if (textObject.simpleText) {
-            return textObject.simpleText;
-        }
-
-        if (textObject.runs && Array.isArray(textObject.runs)) {
-            return textObject.runs.map(run => run.text || '').join('');
-        }
-
-        return '';
-    }
-
-    /**
-     * Check if Japanese subtitles are available for a video
-     * Searches through YouTube's caption data structure
-     */
-    checkForSubtitles(data) {
-        try {
-            // Look for caption tracks in the data
-            const playerResponse = data?.playerResponse;
-            if (playerResponse && typeof playerResponse === 'string') {
-                const parsed = JSON.parse(playerResponse);
-                return !!(parsed?.captions?.playerCaptionsTracklistRenderer?.captionTracks?.length > 0);
-            }
-
-            return false;
-        } catch (error) {
-            return false;
-        }
-    }
 
 
 
@@ -324,8 +195,7 @@ class YouTubeAnalyzer {
         try {
             const allData = await chrome.storage.local.get();
             const cacheKeys = Object.keys(allData).filter(key =>
-                key.startsWith('comprehension_') ||
-                key.startsWith('metadata_')
+                key.startsWith('comprehension_')
             );
 
             if (cacheKeys.length > 0) {
@@ -348,8 +218,7 @@ class YouTubeAnalyzer {
         try {
             const allData = await chrome.storage.local.get();
             persistentCacheSize = Object.keys(allData).filter(key =>
-                key.startsWith('comprehension_') ||
-                key.startsWith('metadata_')
+                key.startsWith('comprehension_')
             ).length;
         } catch (error) {
             console.warn('[JCA] Error getting persistent cache stats:', error);
