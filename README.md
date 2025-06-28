@@ -160,7 +160,6 @@ mecab-api-server/
 **Analysis failing?**
 - Check server logs for Japanese subtitle fetching errors
 - Verify video has Japanese subtitles available
-- Test with `/test/{video_id}` endpoint using local CSV
 
 ### Common Fixes
 
@@ -174,25 +173,6 @@ mecab-api-server/
 1. Check rate limiting settings in youtube-api.js
 2. Clear browser cache and extension storage
 3. Restart browser if extension becomes unresponsive
-
-## Development
-
-### Making Changes
-1. Edit source files in `chrome-extension/` or `mecab-api-server/`
-2. Reload extension in `chrome://extensions/` (click reload button)
-3. Restart MeCab server if you modified server code
-4. Test on YouTube pages
-
-### Key Components
-- **YouTubeComprehensionAnalyzer**: Main content script coordinator
-- **ComprehensionCalculator**: Server-side scoring with AnkiMorphs compatibility
-- **AnkiMorphsCSVParser**: Extension CSV parsing with interval support
-- **MeCabAnalyzer**: Server morphological analysis engine
-
-### Adding Features
-- Modify `youtube-content.js` for UI changes
-- Update `app.py` for server-side analysis improvements
-- Edit `settings.js` for configuration options
 
 ## Contributing
 
