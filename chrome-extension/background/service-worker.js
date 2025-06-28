@@ -123,6 +123,11 @@ class BackgroundService {
                     sendResponse({ success: true });
                     break;
 
+                case 'clearVideoAnalysisCache':
+                    await this.clearVideoAnalysisCache();
+                    sendResponse({ success: true });
+                    break;
+
                 default:
                     sendResponse({ success: false, error: 'Unknown message type' });
             }
@@ -135,6 +140,12 @@ class BackgroundService {
     handleStorageChange(changes, areaName) {
         if (areaName !== 'local') return;
 
+        // Clear video analysis cache when known morphs are updated
+        if (changes.knownMorphsBase64) {
+            console.log('Known morphs CSV updated - clearing video analysis cache');
+            this.clearVideoAnalysisCache();
+        }
+
         // Log significant changes
         if (changes.knownMorphsBase64 || changes.morphCount) {
             const oldCount = changes.morphCount?.oldValue || 0;
@@ -142,8 +153,6 @@ class BackgroundService {
 
             console.log(`Known morphs updated: ${oldCount} → ${newCount}`);
         }
-
-        // Morphemizer is now always 'mecab-api' - no need to track changes
     }
 
     async getVideoAnalysis(videoId) {
@@ -203,7 +212,7 @@ class BackgroundService {
 
             const maxSize = settings.maxCacheSize || 1000;
 
-            // Get all cache entries
+            // Get all background service cache entries (not video analysis cache)
             const allData = await chrome.storage.local.get();
             const cacheEntries = Object.entries(allData)
                 .filter(([key, value]) => key.startsWith('analysis_') && value.timestamp)
@@ -217,8 +226,11 @@ class BackgroundService {
                 // Also remove from memory cache
                 toRemove.forEach(key => this.cache.delete(key));
 
-                console.log(`Cleaned up ${toRemove.length} old cache entries`);
+                console.log(`Cleaned up ${toRemove.length} old background cache entries`);
             }
+
+            // Note: Video analysis cache (comprehension_, metadata_, subtitles_) 
+            // is NOT cleaned up here - only when new CSV is uploaded
 
         } catch (error) {
             console.warn('Error cleaning up cache:', error);
@@ -241,6 +253,53 @@ class BackgroundService {
 
         } catch (error) {
             console.error('Error clearing cache:', error);
+        }
+    }
+
+    async clearVideoAnalysisCache() {
+        try {
+            // Clear memory cache
+            this.cache.clear();
+
+            // Clear persistent video analysis cache (but keep other data like settings)
+            const allData = await chrome.storage.local.get();
+            const analysisCacheKeys = Object.keys(allData).filter(key =>
+                key.startsWith('analysis_') ||
+                key.startsWith('comprehension_') ||
+                key.startsWith('metadata_') ||
+                key.startsWith('subtitles_')
+            );
+
+            if (analysisCacheKeys.length > 0) {
+                await chrome.storage.local.remove(analysisCacheKeys);
+                console.log(`Cleared ${analysisCacheKeys.length} video analysis cache entries`);
+            }
+
+            // Notify content scripts to clear their memory caches
+            this.notifyContentScriptsCacheClear();
+
+        } catch (error) {
+            console.error('Error clearing video analysis cache:', error);
+        }
+    }
+
+    async notifyContentScriptsCacheClear() {
+        try {
+            // Get all tabs
+            const tabs = await chrome.tabs.query({});
+
+            // Notify each tab to clear its cache
+            for (const tab of tabs) {
+                try {
+                    await chrome.tabs.sendMessage(tab.id, {
+                        type: 'clearVideoAnalysisCache'
+                    });
+                } catch (error) {
+                    // Tab might not have content script loaded, ignore error
+                }
+            }
+        } catch (error) {
+            console.warn('Error notifying content scripts:', error);
         }
     }
 

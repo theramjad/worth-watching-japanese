@@ -7,7 +7,25 @@ class YouTubeAnalyzer {
         // Rate limiting to prevent overloading the MeCab API server
         this.rateLimiter = new RateLimiter(300, 60000); // 300 requests per minute
 
+        // Listen for cache clear messages from background script
+        this.setupMessageListener();
+
         console.log('[JCA] YouTube analyzer initialized with rate limiting (300 req/min)');
+    }
+
+    /**
+     * Set up message listener for cache clearing
+     */
+    setupMessageListener() {
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+            chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+                if (message.type === 'clearVideoAnalysisCache') {
+                    console.log('[JCA] Received cache clear message - clearing memory cache');
+                    this.clearCache();
+                    sendResponse({ success: true });
+                }
+            });
+        }
     }
 
     /**
@@ -38,10 +56,22 @@ class YouTubeAnalyzer {
     async getVideoMetadata(videoId) {
         if (!videoId) return null;
 
-        // Check cache first
+        // Check memory cache first
         const cacheKey = `metadata_${videoId}`;
         if (this.cache.has(cacheKey)) {
             return this.cache.get(cacheKey);
+        }
+
+        // Check persistent cache
+        try {
+            const persistentCache = await chrome.storage.local.get(cacheKey);
+            if (persistentCache[cacheKey]) {
+                const metadata = persistentCache[cacheKey];
+                this.cache.set(cacheKey, metadata);
+                return metadata;
+            }
+        } catch (error) {
+            console.warn(`[JCA] Error checking persistent metadata cache: ${error}`);
         }
 
         try {
@@ -49,7 +79,16 @@ class YouTubeAnalyzer {
             const metadata = this.extractMetadataFromPage(videoId);
 
             if (metadata) {
+                // Cache in memory
                 this.cache.set(cacheKey, metadata);
+
+                // Cache persistently
+                try {
+                    await chrome.storage.local.set({ [cacheKey]: metadata });
+                } catch (error) {
+                    console.warn(`[JCA] Error saving metadata to persistent cache: ${error}`);
+                }
+
                 return metadata;
             }
 
@@ -156,10 +195,22 @@ class YouTubeAnalyzer {
     async getSubtitles(videoId) {
         if (!videoId) return null;
 
-        // Check cache first
+        // Check memory cache first
         const cacheKey = `subtitles_${videoId}`;
         if (this.cache.has(cacheKey)) {
             return this.cache.get(cacheKey);
+        }
+
+        // Check persistent cache
+        try {
+            const persistentCache = await chrome.storage.local.get(cacheKey);
+            if (persistentCache[cacheKey]) {
+                const subtitles = persistentCache[cacheKey];
+                this.cache.set(cacheKey, subtitles);
+                return subtitles;
+            }
+        } catch (error) {
+            console.warn(`[JCA] Error checking persistent subtitles cache: ${error}`);
         }
 
         try {
@@ -176,7 +227,16 @@ class YouTubeAnalyzer {
                     const subtitleText = await this.fetchSubtitleTrack(preferredTrack);
 
                     if (subtitleText) {
+                        // Cache in memory
                         this.cache.set(cacheKey, subtitleText);
+
+                        // Cache persistently
+                        try {
+                            await chrome.storage.local.set({ [cacheKey]: subtitleText });
+                        } catch (error) {
+                            console.warn(`[JCA] Error saving subtitles to persistent cache: ${error}`);
+                        }
+
                         return subtitleText;
                     }
                 }
@@ -223,11 +283,25 @@ class YouTubeAnalyzer {
     async getVideoComprehensionScore(videoId) {
         if (!videoId) return null;
 
-        // Check cache first
+        // Check memory cache first
         const cacheKey = `comprehension_${videoId}`;
         if (this.cache.has(cacheKey)) {
-            console.log(`[JCA] Cache hit for video ${videoId}`);
+            console.log(`[JCA] Memory cache hit for video ${videoId}`);
             return this.cache.get(cacheKey);
+        }
+
+        // Check persistent cache
+        try {
+            const persistentCache = await chrome.storage.local.get(cacheKey);
+            if (persistentCache[cacheKey] !== undefined) {
+                console.log(`[JCA] Persistent cache hit for video ${videoId}`);
+                const score = persistentCache[cacheKey];
+                // Update memory cache
+                this.cache.set(cacheKey, score);
+                return score;
+            }
+        } catch (error) {
+            console.warn(`[JCA] Error checking persistent cache: ${error}`);
         }
 
         try {
@@ -269,7 +343,18 @@ class YouTubeAnalyzer {
             if (data && data.success && typeof data.comprehension_score === 'number') {
                 const score = data.comprehension_score;
                 console.log(`[JCA] Successfully analyzed video ${videoId}: ${score}% comprehension`);
+
+                // Cache in memory
                 this.cache.set(cacheKey, score);
+
+                // Cache persistently (will last until new CSV is uploaded)
+                try {
+                    await chrome.storage.local.set({ [cacheKey]: score });
+                    console.log(`[JCA] Cached score for video ${videoId} persistently`);
+                } catch (error) {
+                    console.warn(`[JCA] Error saving to persistent cache: ${error}`);
+                }
+
                 return score;
             } else {
                 const errorMsg = data.error || 'Unknown error';
@@ -443,18 +528,51 @@ class YouTubeAnalyzer {
     /**
      * Clear cache to free memory and force fresh analysis
      */
-    clearCache() {
+    async clearCache() {
+        // Clear memory cache
         this.cache.clear();
-        console.log('[JCA] Video analysis cache cleared');
+
+        // Clear persistent cache for this analyzer
+        try {
+            const allData = await chrome.storage.local.get();
+            const cacheKeys = Object.keys(allData).filter(key =>
+                key.startsWith('comprehension_') ||
+                key.startsWith('metadata_') ||
+                key.startsWith('subtitles_')
+            );
+
+            if (cacheKeys.length > 0) {
+                await chrome.storage.local.remove(cacheKeys);
+                console.log(`[JCA] Cleared ${cacheKeys.length} persistent cache entries`);
+            }
+        } catch (error) {
+            console.warn(`[JCA] Error clearing persistent cache: ${error}`);
+        }
+
+        console.log('[JCA] Video analysis cache cleared (memory and persistent)');
     }
 
     /**
      * Get cache statistics for debugging
      */
-    getCacheStats() {
+    async getCacheStats() {
+        let persistentCacheSize = 0;
+
+        try {
+            const allData = await chrome.storage.local.get();
+            persistentCacheSize = Object.keys(allData).filter(key =>
+                key.startsWith('comprehension_') ||
+                key.startsWith('metadata_') ||
+                key.startsWith('subtitles_')
+            ).length;
+        } catch (error) {
+            console.warn('[JCA] Error getting persistent cache stats:', error);
+        }
+
         return {
-            size: this.cache.size,
-            entries: Array.from(this.cache.keys())
+            memorySize: this.cache.size,
+            persistentSize: persistentCacheSize,
+            memoryEntries: Array.from(this.cache.keys())
         };
     }
 }
