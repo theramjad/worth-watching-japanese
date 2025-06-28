@@ -111,7 +111,49 @@ class YouTubeComprehensionAnalyzer {
             subtree: true
         });
 
-        console.log('YouTube comprehension analyzer started');
+        // Additional scroll listener for playlist infinite scroll detection
+        this.setupScrollListener();
+
+        console.log('[JCA] YouTube comprehension analyzer started with dynamic content detection');
+    }
+
+    /**
+     * Set up scroll listener for additional infinite scroll detection
+     * Helps catch cases where MutationObserver might miss new content
+     */
+    setupScrollListener() {
+        // Remove existing listener if any
+        if (this.scrollListener) {
+            window.removeEventListener('scroll', this.scrollListener);
+        }
+
+        this.scrollListener = () => {
+            // Only check on playlist pages
+            const currentPath = window.location.pathname;
+            const isPlaylistPage = currentPath.includes('/playlist') || currentPath.includes('watchlater') || window.location.search.includes('list=');
+
+            if (!isPlaylistPage || !this.isEnabled) return;
+
+            // Debounce scroll events
+            clearTimeout(this.scrollTimeout);
+            this.scrollTimeout = setTimeout(() => {
+                // Check if we're near the bottom of the page (triggers YouTube to load more)
+                const scrollPosition = window.scrollY + window.innerHeight;
+                const documentHeight = document.documentElement.scrollHeight;
+                const threshold = 0.8; // Trigger when 80% scrolled
+
+                if (scrollPosition >= documentHeight * threshold) {
+                    console.log('[JCA] Near bottom of playlist page - checking for new videos in 2 seconds...');
+
+                    // Wait a bit for YouTube to load new content
+                    setTimeout(() => {
+                        this.analyzeNewVideos();
+                    }, 2000);
+                }
+            }, 100); // 100ms debounce
+        };
+
+        window.addEventListener('scroll', this.scrollListener, { passive: true });
     }
 
     /**
@@ -123,7 +165,17 @@ class YouTubeComprehensionAnalyzer {
             this.observer = null;
         }
 
-        console.log('YouTube comprehension analyzer stopped');
+        if (this.scrollListener) {
+            window.removeEventListener('scroll', this.scrollListener);
+            this.scrollListener = null;
+        }
+
+        // Clear any pending timeouts
+        clearTimeout(this.analysisTimeout);
+        clearTimeout(this.pageChangeTimeout);
+        clearTimeout(this.scrollTimeout);
+
+        console.log('[JCA] YouTube comprehension analyzer stopped');
     }
 
     /**
@@ -135,6 +187,7 @@ class YouTubeComprehensionAnalyzer {
 
         let hasNewVideos = false;
         let hasPageChanged = false;
+        let addedVideoCount = 0;
 
         for (const mutation of mutations) {
             for (const node of mutation.addedNodes) {
@@ -142,23 +195,39 @@ class YouTubeComprehensionAnalyzer {
                     // Check if this node or its children contain video elements
                     if (this.containsVideoElements(node)) {
                         hasNewVideos = true;
+
+                        // Count how many video elements were added for better logging
+                        const videoElements = this.getVideoElementsFromNode(node);
+                        addedVideoCount += videoElements.length;
                     }
 
                     // Check if we're on a video page now
                     if (node.matches && (node.matches('ytd-watch-flexy') || node.querySelector('ytd-watch-flexy'))) {
                         hasPageChanged = true;
                     }
+
+                    // Special detection for playlist infinite scroll containers
+                    if (node.matches && (
+                        node.matches('ytd-playlist-video-list-renderer') ||
+                        node.matches('[data-content-type="playlist"]') ||
+                        node.querySelector('ytd-playlist-video-renderer')
+                    )) {
+                        hasNewVideos = true;
+                        console.log('[JCA] Detected playlist content being added to DOM');
+                    }
                 }
             }
         }
 
         if (hasNewVideos) {
+            console.log(`[JCA] Detected ${addedVideoCount} new video elements added to DOM`);
+
             // Debounce to avoid excessive processing and wait for content to load
             clearTimeout(this.analysisTimeout);
             this.analysisTimeout = setTimeout(() => {
-                console.log('Starting delayed video analysis...');
+                console.log('[JCA] Starting delayed video analysis for newly loaded content...');
                 this.analyzeNewVideos();
-            }, 2000); // Increased delay to 2 seconds
+            }, 1500); // Reduced to 1.5 seconds for better responsiveness
         }
 
         if (hasPageChanged) {
@@ -181,7 +250,9 @@ class YouTubeComprehensionAnalyzer {
             'ytd-compact-video-renderer',
             'ytd-grid-video-renderer',
             'ytd-rich-item-renderer',
-            'ytd-shorts-renderer'
+            'ytd-shorts-renderer',
+            'ytd-playlist-video-renderer',
+            'ytd-playlist-video-list-renderer'
         ];
 
         for (const selector of videoSelectors) {
@@ -197,15 +268,55 @@ class YouTubeComprehensionAnalyzer {
     }
 
     /**
+     * Get all video elements from a DOM node (for counting purposes)
+     */
+    getVideoElementsFromNode(node) {
+        const videoSelectors = [
+            'ytd-video-renderer',
+            'ytd-compact-video-renderer',
+            'ytd-grid-video-renderer',
+            'ytd-rich-item-renderer',
+            'ytd-shorts-renderer',
+            'ytd-playlist-video-renderer'
+        ];
+
+        const videos = [];
+
+        // Check if the node itself is a video element
+        for (const selector of videoSelectors) {
+            if (node.matches && node.matches(selector)) {
+                videos.push(node);
+                break;
+            }
+        }
+
+        // Find video elements within the node
+        videoSelectors.forEach(selector => {
+            const foundVideos = node.querySelectorAll ? node.querySelectorAll(selector) : [];
+            videos.push(...foundVideos);
+        });
+
+        return videos;
+    }
+
+    /**
      * Analyze videos that were already on the page when script loaded
      */
     analyzeExistingVideos() {
         // Wait a bit for page to fully load
         setTimeout(() => {
-            const videos = this.findAllVideoElements();
-            console.log(`Found ${videos.length} existing videos to analyze`);
+            const currentPath = window.location.pathname;
+            const isPlaylistPage = currentPath.includes('/playlist') || currentPath.includes('watchlater') || window.location.search.includes('list=');
 
-            videos.forEach(video => this.analyzeVideo(video));
+            const videos = this.findAllVideoElements();
+            console.log(`[JCA] Found ${videos.length} existing videos to analyze on ${isPlaylistPage ? 'playlist' : 'other'} page`);
+
+            // Process videos with a small delay between each to avoid overwhelming the API
+            videos.forEach((video, index) => {
+                setTimeout(() => {
+                    this.analyzeVideo(video);
+                }, index * 200); // 200ms delay between each video analysis
+            });
         }, 1000);
     }
 
@@ -213,11 +324,26 @@ class YouTubeComprehensionAnalyzer {
      * Analyze newly added videos (from infinite scroll, navigation, etc.)
      */
     analyzeNewVideos() {
+        const currentPath = window.location.pathname;
+        const isPlaylistPage = currentPath.includes('/playlist') || currentPath.includes('watchlater') || window.location.search.includes('list=');
+
         const videos = this.findAllVideoElements();
         const newVideos = videos.filter(video => !this.isVideoProcessed(video));
 
-        console.log(`Found ${newVideos.length} new videos to analyze`);
-        newVideos.forEach(video => this.analyzeVideo(video));
+        console.log(`[JCA] Analyzing newly loaded videos on ${isPlaylistPage ? 'playlist' : 'other'} page`);
+        console.log(`[JCA] Total videos found: ${videos.length}, New videos to analyze: ${newVideos.length}`);
+
+        if (newVideos.length === 0) {
+            console.log(`[JCA] No new videos to analyze (all ${videos.length} videos already processed)`);
+            return;
+        }
+
+        // Process new videos with a small delay between each to avoid overwhelming the API
+        newVideos.forEach((video, index) => {
+            setTimeout(() => {
+                this.analyzeVideo(video);
+            }, index * 200); // 200ms delay between each video analysis
+        });
     }
 
     /**
