@@ -145,11 +145,6 @@ mecab-api-server/
 - Ensure you're on Japanese content (extension only analyzes Japanese videos)
 - Check browser console for error messages (F12 → Console)
 
-**Scores seem too low compared to AnkiMorphs?**
-- Make sure your CSV includes interval data (`Highest-Learning-Interval`)
-- Verify you exported "Inflections" (not just "Lemmas") from AnkiMorphs
-- Check that the MeCab server is being used (not fallback tokenizer)
-
 **Extension not loading?**
 - Ensure Developer Mode is enabled in `chrome://extensions/`
 - Check for permission errors in the extension console
