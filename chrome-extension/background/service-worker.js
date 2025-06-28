@@ -22,10 +22,7 @@ class BackgroundService {
             this.handleStorageChange(changes, areaName);
         });
 
-        // Periodic cleanup
-        setInterval(() => {
-            this.performCleanup();
-        }, 30 * 60 * 1000); // Every 30 minutes
+
     }
 
     handleInstalled(details) {
@@ -205,37 +202,7 @@ class BackgroundService {
         await this.cleanupOldCacheEntries();
     }
 
-    async cleanupOldCacheEntries() {
-        try {
-            const settings = await chrome.storage.local.get(['maxCacheSize', 'cacheEnabled']);
-            if (!settings.cacheEnabled) return;
 
-            const maxSize = settings.maxCacheSize || 1000;
-
-            // Get all background service cache entries (not video analysis cache)
-            const allData = await chrome.storage.local.get();
-            const cacheEntries = Object.entries(allData)
-                .filter(([key, value]) => key.startsWith('analysis_') && value.timestamp)
-                .sort((a, b) => b[1].timestamp - a[1].timestamp); // Sort by timestamp, newest first
-
-            // Remove oldest entries if over limit
-            if (cacheEntries.length > maxSize) {
-                const toRemove = cacheEntries.slice(maxSize).map(([key]) => key);
-                await chrome.storage.local.remove(toRemove);
-
-                // Also remove from memory cache
-                toRemove.forEach(key => this.cache.delete(key));
-
-                console.log(`Cleaned up ${toRemove.length} old background cache entries`);
-            }
-
-            // Note: Video analysis cache (comprehension_, metadata_, subtitles_) 
-            // is NOT cleaned up here - only when new CSV is uploaded
-
-        } catch (error) {
-            console.warn('Error cleaning up cache:', error);
-        }
-    }
 
     async clearCache() {
         try {
@@ -266,8 +233,7 @@ class BackgroundService {
             const analysisCacheKeys = Object.keys(allData).filter(key =>
                 key.startsWith('analysis_') ||
                 key.startsWith('comprehension_') ||
-                key.startsWith('metadata_') ||
-                key.startsWith('subtitles_')
+                key.startsWith('metadata_')
             );
 
             if (analysisCacheKeys.length > 0) {
@@ -329,29 +295,7 @@ class BackgroundService {
         }
     }
 
-    async performCleanup() {
-        try {
-            // Cleanup old cache entries
-            await this.cleanupOldCacheEntries();
 
-            // Clear memory cache if it gets too large
-            if (this.cache.size > 500) {
-                // Keep only the 100 most recently accessed items
-                const entries = Array.from(this.cache.entries());
-                entries.sort((a, b) => (b[1].lastAccessed || 0) - (a[1].lastAccessed || 0));
-
-                this.cache.clear();
-                entries.slice(0, 100).forEach(([key, value]) => {
-                    this.cache.set(key, value);
-                });
-
-                console.log('Performed memory cache cleanup');
-            }
-
-        } catch (error) {
-            console.warn('Error during cleanup:', error);
-        }
-    }
 
     showWelcomeMessage() {
         // Could show a notification or badge here

@@ -188,66 +188,7 @@ class YouTubeAnalyzer {
         }
     }
 
-    /**
-     * Get Japanese subtitles for a video
-     * Returns the full subtitle text concatenated as a string
-     */
-    async getSubtitles(videoId) {
-        if (!videoId) return null;
 
-        // Check memory cache first
-        const cacheKey = `subtitles_${videoId}`;
-        if (this.cache.has(cacheKey)) {
-            return this.cache.get(cacheKey);
-        }
-
-        // Check persistent cache
-        try {
-            const persistentCache = await chrome.storage.local.get(cacheKey);
-            if (persistentCache[cacheKey]) {
-                const subtitles = persistentCache[cacheKey];
-                this.cache.set(cacheKey, subtitles);
-                return subtitles;
-            }
-        } catch (error) {
-            console.warn(`[JCA] Error checking persistent subtitles cache: ${error}`);
-        }
-
-        try {
-            await this.rateLimiter.waitForPermission();
-
-            // Try to find subtitle tracks
-            const subtitleTracks = this.findSubtitleTracks(videoId);
-
-            if (subtitleTracks.length > 0) {
-                // Prefer Japanese subtitles, fall back to auto-generated
-                const preferredTrack = this.selectPreferredTrack(subtitleTracks);
-
-                if (preferredTrack) {
-                    const subtitleText = await this.fetchSubtitleTrack(preferredTrack);
-
-                    if (subtitleText) {
-                        // Cache in memory
-                        this.cache.set(cacheKey, subtitleText);
-
-                        // Cache persistently
-                        try {
-                            await chrome.storage.local.set({ [cacheKey]: subtitleText });
-                        } catch (error) {
-                            console.warn(`[JCA] Error saving subtitles to persistent cache: ${error}`);
-                        }
-
-                        return subtitleText;
-                    }
-                }
-            }
-
-        } catch (error) {
-            console.warn(`Error fetching subtitles for video ${videoId}:`, error);
-        }
-
-        return null;
-    }
 
     /**
      * Convert stored known morphs to base64-encoded CSV format
@@ -368,166 +309,13 @@ class YouTubeAnalyzer {
         }
     }
 
-    /**
-     * Find available subtitle tracks in the page data
-     * Searches through script tags for YouTube's caption track data
-     */
-    findSubtitleTracks(videoId) {
-        const tracks = [];
 
-        // Look for caption track information in page data
-        const scripts = document.querySelectorAll('script');
-        console.log(`[JCA] Searching through ${scripts.length} script tags for caption tracks`);
 
-        let scriptsWithCaptionTracks = 0;
-        let totalMatches = 0;
 
-        for (const script of scripts) {
-            if (script.textContent && script.textContent.includes('captionTracks')) {
-                scriptsWithCaptionTracks++;
-                console.log(`[JCA] Found script with 'captionTracks' text (${scriptsWithCaptionTracks})`);
-
-                try {
-                    const match = script.textContent.match(/"captionTracks":\s*(\[.*?\])/);
-                    if (match) {
-                        totalMatches++;
-                        console.log(`[JCA] Found captionTracks JSON match ${totalMatches}:`, match[1].substring(0, 200) + '...');
-                        const captionTracks = JSON.parse(match[1]);
-                        console.log(`[JCA] Parsed ${captionTracks.length} caption tracks`);
-                        tracks.push(...captionTracks);
-                    }
-                } catch (error) {
-                    console.log(`[JCA] Error parsing caption tracks JSON:`, error);
-                    // Continue searching
-                }
-            }
-        }
-
-        console.log(`[JCA] Subtitle track search complete: ${scriptsWithCaptionTracks} scripts with 'captionTracks', ${totalMatches} JSON matches, ${tracks.length} total tracks found`);
-        console.log(`[JCA] Current page URL: ${window.location.href}`);
-        console.log(`[JCA] Current page path: ${window.location.pathname}`);
-
-        return tracks;
-    }
 
     /**
-     * Select the best Japanese subtitle track
-     * Prioritizes manual subtitles over auto-generated
-     */
-    selectPreferredTrack(tracks) {
-        // Prefer Japanese tracks
-        const japaneseTracks = this.filterJapaneseTracks(tracks);
-
-        if (japaneseTracks.length > 0) {
-            return this.selectPreferredJapaneseTrack(japaneseTracks);
-        }
-
-        // Fall back to auto-generated if available
-        const autoTracks = tracks.filter(track => track.kind === 'asr');
-        return autoTracks[0] || tracks[0] || null;
-    }
-
-    /**
-     * Filter tracks to only Japanese ones
-     * Checks language codes and track names for Japanese indicators
-     */
-    filterJapaneseTracks(tracks) {
-        return tracks.filter(track => {
-            // Check language code
-            if (track.languageCode === 'ja' || track.languageCode === 'ja-JP' || track.languageCode === 'jp') {
-                return true;
-            }
-
-            // Check name/label for Japanese indicators
-            if (track.name && track.name.simpleText) {
-                const name = track.name.simpleText.toLowerCase();
-                return name.includes('日本語') || name.includes('japanese') || name.includes('japan');
-            }
-
-            // Check vssId for Japanese indicators
-            if (track.vssId) {
-                return track.vssId.includes('.ja') || track.vssId.includes('ja.');
-            }
-
-            return false;
-        });
-    }
-
-    /**
-     * Select preferred Japanese track (manual over auto-generated)
-     */
-    selectPreferredJapaneseTrack(japaneseTracks) {
-        if (japaneseTracks.length === 0) return null;
-
-        // Prefer manual over auto-generated
-        const manualTracks = japaneseTracks.filter(track => !track.kind || track.kind !== 'asr');
-        if (manualTracks.length > 0) {
-            return manualTracks[0];
-        }
-
-        // Fall back to auto-generated Japanese
-        const autoTracks = japaneseTracks.filter(track => track.kind === 'asr');
-        return autoTracks[0] || japaneseTracks[0];
-    }
-
-    /**
-     * Fetch subtitle content from a YouTube caption track
-     */
-    async fetchSubtitleTrack(track) {
-        if (!track.baseUrl) return null;
-
-        try {
-            const response = await fetch(track.baseUrl);
-            if (!response.ok) return null;
-
-            const subtitleXml = await response.text();
-            return this.parseSubtitleXml(subtitleXml);
-
-        } catch (error) {
-            console.warn('Error fetching subtitle track:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Parse subtitle XML/VTT content to extract plain text
-     * Handles both YouTube XML format and WebVTT format
-     */
-    parseSubtitleXml(xmlContent) {
-        try {
-            // Handle different subtitle formats
-            if (xmlContent.includes('<transcript>')) {
-                // YouTube XML format
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(xmlContent, 'text/xml');
-                const textNodes = doc.querySelectorAll('text');
-
-                return Array.from(textNodes)
-                    .map(node => node.textContent)
-                    .filter(text => text && text.trim())
-                    .join(' ');
-
-            } else if (xmlContent.includes('WEBVTT')) {
-                // WebVTT format
-                return xmlContent
-                    .split('\n')
-                    .filter(line => !line.includes('-->') &&
-                        !line.startsWith('WEBVTT') &&
-                        !line.match(/^\d+$/) &&
-                        line.trim())
-                    .join(' ');
-            }
-
-        } catch (error) {
-            console.warn('Error parsing subtitle content:', error);
-        }
-
-        return null;
-    }
-
-    /**
-     * Clear cache to free memory and force fresh analysis
-     */
+ * Clear cache to free memory and force fresh analysis
+ */
     async clearCache() {
         // Clear memory cache
         this.cache.clear();
@@ -537,8 +325,7 @@ class YouTubeAnalyzer {
             const allData = await chrome.storage.local.get();
             const cacheKeys = Object.keys(allData).filter(key =>
                 key.startsWith('comprehension_') ||
-                key.startsWith('metadata_') ||
-                key.startsWith('subtitles_')
+                key.startsWith('metadata_')
             );
 
             if (cacheKeys.length > 0) {
@@ -553,8 +340,8 @@ class YouTubeAnalyzer {
     }
 
     /**
-     * Get cache statistics for debugging
-     */
+ * Get cache statistics for debugging
+ */
     async getCacheStats() {
         let persistentCacheSize = 0;
 
@@ -562,8 +349,7 @@ class YouTubeAnalyzer {
             const allData = await chrome.storage.local.get();
             persistentCacheSize = Object.keys(allData).filter(key =>
                 key.startsWith('comprehension_') ||
-                key.startsWith('metadata_') ||
-                key.startsWith('subtitles_')
+                key.startsWith('metadata_')
             ).length;
         } catch (error) {
             console.warn('[JCA] Error getting persistent cache stats:', error);
